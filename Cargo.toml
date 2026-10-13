@@ -5,6 +5,7 @@ members = [
     "crates/rvcsi-dsp",
     "crates/rvcsi-events",
     "crates/rvcsi-adapter-file",
+    "crates/rvcsi-adapter-esp32",
     "crates/rvcsi-adapter-nexmon",
     "crates/rvcsi-ruvector",
     "crates/rvcsi-runtime",
@@ -13,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 authors = ["rUv <ruv@ruv.net>"]
 license = "MIT OR Apache-2.0"

@@ -30,7 +30,8 @@ pub struct CaptureRuntime {
 }
 
 impl CaptureRuntime {
-    fn new(source: Box<dyn CsiSource>, policy: ValidationPolicy) -> Self {
+    /// Compose any source with the standard validation, DSP and event pipeline.
+    pub fn new(source: Box<dyn CsiSource>, policy: ValidationPolicy) -> Self {
         let profile = source.profile().clone();
         let session_id = source.session_id();
         let source_id = source.source_id().clone();
@@ -44,6 +45,20 @@ impl CaptureRuntime {
             frames_seen: 0,
             frames_dropped: 0,
         }
+    }
+
+    /// Open ESP32 collector JSONL without an intermediate capture file.
+    pub fn open_esp32_jsonl(
+        path: &str,
+        source_id: &str,
+        session_id: u64,
+    ) -> Result<Self, RvcsiError> {
+        let source = rvcsi_adapter_esp32::Esp32Adapter::open(
+            path,
+            SourceId::from(source_id),
+            SessionId(session_id),
+        )?;
+        Ok(Self::new(Box::new(source), ValidationPolicy::default()))
     }
 
     /// Open a `.rvcsi` capture file as the source.

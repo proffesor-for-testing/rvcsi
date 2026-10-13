@@ -468,6 +468,73 @@ pub fn calibrate(out: &mut dyn Write, capture: &str, out_path: Option<&str>) -> 
     Ok(())
 }
 
+/// Options for bounded ESP32 recording.
+pub struct Esp32RecordOptions<'a> {
+    pub transport: &'a str,
+    pub input: &'a str,
+    pub output: &'a str,
+    pub source_id: &'a str,
+    pub session: u64,
+    pub limit: Option<usize>,
+    pub baud: u32,
+    pub timeout_ms: u64,
+}
+
+/// Record only validated ESP32 frames. Publish atomically, without overwriting
+/// existing data. A malformed record or timeout fails the command and discards
+/// the temporary capture, rather than presenting a partial capture as success.
+pub fn record_esp32(out: &mut dyn Write, o: Esp32RecordOptions<'_>) -> Result<()> {
+    use rvcsi_adapter_esp32::Esp32Adapter;
+    use std::{path::Path, time::Duration};
+    anyhow::ensure!(o.limit != Some(0), "--limit must be positive");
+    anyhow::ensure!(o.timeout_ms > 0, "--timeout-ms must be positive");
+    let path = Path::new(o.output);
+    anyhow::ensure!(!path.exists(), "output already exists; choose a new path");
+    let source = SourceId::from(o.source_id);
+    let session = SessionId(o.session);
+    let timeout = Duration::from_millis(o.timeout_ms);
+    if o.transport != "esp32-jsonl" {
+        anyhow::ensure!(o.limit.is_some(), "live ESP32 capture requires --limit");
+    }
+    let mut src = match o.transport {
+        "esp32-jsonl" => Esp32Adapter::open(o.input, source, session)?,
+        "esp32-serial" => Esp32Adapter::serial(o.input, o.baud, timeout, source, session)?,
+        "esp32-udp" => Esp32Adapter::bind(o.input.parse()?, timeout, source, session)?,
+        _ => anyhow::bail!("unsupported ESP32 transport"),
+    };
+    let header = CaptureHeader::new(session, src.source_id().clone(), src.profile().clone());
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let temp = tempfile::NamedTempFile::new_in(parent)?;
+    let mut recorder = FileRecorder::create(temp.path(), &header)?;
+    let mut count = 0usize;
+    let mut prev = None;
+    while o.limit.is_none_or(|limit| count < limit) {
+        let Some(mut frame) = src.next_frame()? else {
+            break;
+        };
+        validate_frame(
+            &mut frame,
+            src.profile(),
+            &ValidationPolicy::default(),
+            prev,
+        )?;
+        anyhow::ensure!(frame.is_exposable(), "frame not exposable");
+        prev = Some(frame.timestamp_ns);
+        recorder.write_frame(&frame)?;
+        count += 1;
+    }
+    src.stop()?;
+    anyhow::ensure!(count > 0, "no ESP32 frames received");
+    recorder.finish()?;
+    temp.as_file().sync_all()?;
+    temp.persist_noclobber(path)?;
+    writeln!(out, "recorded {count} ESP32 frame(s) to {}", o.output)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

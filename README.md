@@ -35,6 +35,7 @@ The architecture is set by **[ADR-095](docs/adr/ADR-095-rvcsi-edge-rf-sensing-pl
 | [`rvcsi-core`](crates/rvcsi-core) | no (`forbid`) | The normalized `CsiFrame`/`CsiWindow`/`CsiEvent` schema, `AdapterProfile`, the `CsiSource` plugin trait, id newtypes + `IdGenerator`, `RvcsiError`, the `validate_frame` pipeline + quality scoring. The shared kernel. |
 | [`rvcsi-dsp`](crates/rvcsi-dsp) | no (`forbid`) | Pure DSP primitives (`mean`/`variance`/`median`, `remove_dc_offset`, `unwrap_phase`, `moving_average`, `ewma`, `hampel_filter`, `short_window_variance`, `subtract_baseline`), scalar features (`motion_energy`, `presence_score`, `confidence_score`, heuristic `breathing_band_estimate`), and a non-destructive `SignalPipeline::process_frame`. |
 | [`rvcsi-events`](crates/rvcsi-events) | no (`forbid`) | `WindowBuffer` (frames → `CsiWindow`), the `EventDetector` trait + presence/motion/quality/baseline-drift state machines (drift thresholds are **scale-relative** — a fraction of the baseline magnitude — so one tuning works across `int8` ESP32, `int16`-scaled Nexmon, and baseline-subtracted streams), and `EventPipeline`. |
+| [`rvcsi-adapter-esp32`](crates/rvcsi-adapter-esp32) | no (`forbid`) | Bounded collector JSONL, serial and UDP capture; signed I/Q decoding; `CsiSource` integration. |
 | [`rvcsi-adapter-file`](crates/rvcsi-adapter-file) | no (`forbid`) | The `.rvcsi` capture container (JSONL: a header line + one `CsiFrame` per line), `FileRecorder`, `FileReplayAdapter` — deterministic replay. |
 | [`rvcsi-adapter-nexmon`](crates/rvcsi-adapter-nexmon) | **yes** (FFI only) | The **napi-c** seam: `native/rvcsi_nexmon_shim.{c,h}` (the only C in the runtime — allocation-free, bounds-checked, ABI `1.1`) compiled via `build.rs`+`cc`, handling the rvCSI Nexmon record **and** the real nexmon_csi UDP payload (18-byte header + `int16` I/Q) + a Broadcom d11ac **chanspec decoder**; a pure-Rust **libpcap reader**; a **Nexmon-chip / Raspberry-Pi-model registry** (incl. **Pi 5 → BCM43455c0**); `NexmonAdapter` + `NexmonPcapAdapter` `CsiSource`s. |
 | [`rvcsi-ruvector`](crates/rvcsi-ruvector) | no (`forbid`) | The RuVector RF-memory bridge: deterministic `window_embedding`/`event_embedding`, `cosine_similarity`, the `RfMemoryStore` trait, `InMemoryRfMemory` + `JsonlRfMemory` (standins until the production RuVector binding lands). |
@@ -42,7 +43,7 @@ The architecture is set by **[ADR-095](docs/adr/ADR-095-rvcsi-edge-rf-sensing-pl
 | [`rvcsi-node`](crates/rvcsi-node) | no (`deny(clippy::all)`) | The **napi-rs** seam — the `.node` addon (cdylib + rlib) exposing a safe TS-facing surface (thin `#[napi]` wrappers over `rvcsi-runtime`); ships as the [`@ruv/rvcsi`](https://www.npmjs.com/package/@ruv/rvcsi) npm package. |
 | [`rvcsi-cli`](crates/rvcsi-cli) | no | The `rvcsi` binary: `record`, `inspect`, `inspect-nexmon`, `nexmon-chips`, `decode-chanspec`, `replay`, `stream`, `events`, `health`, `calibrate`, `export ruvector`. |
 
-`rvcsi-mcp` (an MCP tool server), `rvcsi-daemon` (live radio capture + WebSocket), `rvcsi-adapter-esp32` (a live ESP32 serial/UDP source), and the legacy nexmon *packed-float* CSI export are tracked as follow-ups on top of these crates.
+`rvcsi-mcp` (an MCP tool server), `rvcsi-daemon` (live radio capture + WebSocket), and the legacy nexmon *packed-float* CSI export are tracked as follow-ups on top of these crates.
 
 ---
 
@@ -62,10 +63,10 @@ cargo install rvcsi-cli      # installs the `rvcsi` binary
 
 # or a library, in Cargo.toml
 [dependencies]
-rvcsi-core    = "0.3"
-rvcsi-dsp     = "0.3"
-rvcsi-events  = "0.3"
-rvcsi-runtime = "0.3"        # the composition layer most apps want
+rvcsi-core    = "0.4"
+rvcsi-dsp     = "0.4"
+rvcsi-events  = "0.4"
+rvcsi-runtime = "0.4"        # the composition layer most apps want
 ```
 
 ### Node / TypeScript
@@ -113,7 +114,21 @@ rvcsi decode-chanspec 0xe024
 rvcsi nexmon-chips
 ```
 
-There is **no ESP32 adapter crate yet** — until `rvcsi-adapter-esp32` lands, an ESP32 `.csi.jsonl` recording can be transcoded into `.rvcsi` with the bridge script in [`scripts/`](scripts/), then run through the same `inspect` / `events` / `calibrate` toolchain.
+### ESP32: native file, serial and UDP capture
+
+The [`rvcsi-adapter-esp32`](crates/rvcsi-adapter-esp32) crate now implements `CsiSource` for collector JSONL, native serial and UDP. Build this checkout for the new commands; registry publication is separate.
+
+```bash
+cargo build --release -p rvcsi-cli
+./target/release/rvcsi record --source esp32-jsonl --in session.csi.jsonl --out session.rvcsi
+./target/release/rvcsi record --source esp32-serial --in /dev/ttyUSB0 --baud 115200 --limit 1000 --out serial.rvcsi
+./target/release/rvcsi record --source esp32-udp --in 127.0.0.1:5501 --limit 1000 --out udp.rvcsi
+./target/release/rvcsi inspect session.rvcsi --json
+./target/release/rvcsi events session.rvcsi --json
+./target/release/rvcsi calibrate --in session.rvcsi --out baseline.json
+```
+
+Firmware or a collector must emit the documented `raw_csi` JSON contract, not arbitrary ESP-IDF CSV. Live capture requires a frame limit; receive timeout defaults to 5 seconds. Failed captures are not published, and existing outputs are never overwritten. UDP is unauthenticated: bind explicitly and restrict senders. See the [adapter guide](crates/rvcsi-adapter-esp32) and [ADR-097](docs/adr/ADR-097-esp32-source-adapter.md). A [measured ESP32-C6 verification](docs/verification/esp32-c6-2026-10-12.md) covers real binary UDP through a collector into this adapter; direct JSON serial and other boards remain unqualified.
 
 ---
 

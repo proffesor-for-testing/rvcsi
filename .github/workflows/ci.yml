@@ -27,6 +27,9 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: cargo test
         run: cargo test --workspace
+      - name: ESP32 serial and UDP transport acceptance
+        if: runner.os == 'Linux'
+        run: python3 scripts/test_esp32_transports.py
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets
       - name: cargo fmt --check
@@ -46,4 +49,7 @@ jobs:
       - run: npm run build
         working-directory: crates/rvcsi-node
       - run: npm test
+        working-directory: crates/rvcsi-node
+      - name: Verify native addon version
+        run: node -e "require('node:assert/strict').equal(require('./index.js').rvcsiVersion(), require('./package.json').version)"
         working-directory: crates/rvcsi-node

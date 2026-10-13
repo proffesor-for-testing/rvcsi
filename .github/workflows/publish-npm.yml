@@ -52,6 +52,12 @@ jobs:
       - name: Smoke test
         run: npm test
 
+      - name: Verify native addon version
+        run: node -e "require('node:assert/strict').equal(require('./index.js').rvcsiVersion(), require('./package.json').version)"
+
+      - name: Preview package contents
+        run: npm pack --dry-run
+
       - name: Publish @ruv/rvcsi
         run: npm publish --access public
         # OIDC auth — the workflow must be registered as a Trusted Publisher on npm.

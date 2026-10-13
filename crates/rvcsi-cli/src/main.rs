@@ -20,13 +20,23 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Transcode a Nexmon source into a `.rvcsi` capture (validating each frame).
+    /// Transcode a CSI source into a `.rvcsi` capture (validating each frame).
     Record {
         /// Input format: `nexmon` (a buffer of "rvCSI Nexmon records", the napi-c
         /// shim format) or `nexmon-pcap` (a real nexmon_csi libpcap capture,
-        /// `tcpdump -i wlan0 dst port 5500 -w csi.pcap`).
+        /// `tcpdump -i wlan0 dst port 5500 -w csi.pcap`), esp32-jsonl,
+        /// esp32-serial, or esp32-udp (one JSON record per datagram).
         #[arg(long, default_value = "nexmon")]
         source: String,
+        /// Maximum frames for ESP32 capture (required for live serial/UDP).
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Serial baud rate for esp32-serial.
+        #[arg(long, default_value_t = 115200)]
+        baud: u32,
+        /// Serial/UDP receive timeout in milliseconds; timeout fails capture.
+        #[arg(long, default_value_t = 5000)]
+        timeout_ms: u64,
         /// Path to the input (`.bin` of records, or a `.pcap`).
         #[arg(long = "in")]
         input: String,
@@ -166,6 +176,9 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Record {
             source,
+            limit,
+            baud,
+            timeout_ms,
             input,
             output,
             source_id,
@@ -173,6 +186,29 @@ fn main() -> anyhow::Result<()> {
             port,
             chip,
         } => match source.as_str() {
+            "esp32-jsonl" | "esp32-serial" | "esp32-udp" => {
+                anyhow::ensure!(
+                    port.is_none() && chip.is_none(),
+                    "--port and --chip are Nexmon options"
+                );
+                commands::record_esp32(
+                    &mut out,
+                    commands::Esp32RecordOptions {
+                        transport: &source,
+                        input: &input,
+                        output: &output,
+                        source_id: if source_id == "nexmon" {
+                            "esp32"
+                        } else {
+                            &source_id
+                        },
+                        session,
+                        limit,
+                        baud,
+                        timeout_ms,
+                    },
+                )?;
+            }
             "nexmon" => {
                 commands::record_from_nexmon(&mut out, &input, &output, &source_id, session)?
             }
@@ -186,7 +222,7 @@ fn main() -> anyhow::Result<()> {
                 chip.as_deref(),
             )?,
             other => {
-                anyhow::bail!("unknown --source `{other}` (expected `nexmon` or `nexmon-pcap`)")
+                anyhow::bail!("unknown --source `{other}` (expected nexmon, nexmon-pcap, esp32-jsonl, esp32-serial or esp32-udp)")
             }
         },
         Command::NexmonChips { json } => commands::nexmon_chips_cmd(&mut out, json)?,

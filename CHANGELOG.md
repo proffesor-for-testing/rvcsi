@@ -4,6 +4,45 @@ All notable changes to rvCSI are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/); the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-10-12
+
+### Added
+
+- `rvcsi-adapter-esp32`: a native Rust `CsiSource` for collector JSONL files,
+  configured serial ports, and UDP. The bounded decoder preserves signed
+  imaginary/real I/Q ordering and nanosecond timestamps, handles
+  `first_word_invalid`, and returns frames for the existing validation pipeline.
+- Rust runtime source composition and `CaptureRuntime::open_esp32_jsonl`, plus
+  CLI `record` sources `esp32-jsonl`, `esp32-serial`, and `esp32-udp`. Live
+  captures require a frame limit and receive timeout. Validated captures are
+  published without overwriting existing files; failed captures leave no
+  published partial output.
+- Regression coverage for adapter decoding, file capture through events,
+  calibration and RF memory export, UDP loopback, and serial pseudo-terminals.
+
+### Fixed
+
+- Oversized UDP datagrams are received into a bounded transport buffer before
+  enforcing the 32 KiB record limit. Windows now reports the same rejected-record
+  accounting as other platforms instead of stopping at a truncated-receive error.
+- CI and npm publication require the built native addon to load and report the
+  package version; the source-only fallback test cannot satisfy this release gate.
+
+### Notes
+
+- Workspace crates and internal dependency requirements advance together to
+  `0.4.0`. Cargo consumers using `^0.3` must opt into `0.4`.
+- `@ruv/rvcsi` advances to `0.4.0` with its existing Node API. The new direct
+  ESP32 source constructors are Rust APIs; Node can process the resulting
+  `.rvcsi` captures through its existing interfaces.
+- The adapter requires the documented collector JSON contract. ESP-IDF CSV and
+  binary firmware protocols require a separate conversion step. UDP remains
+  unauthenticated. Automated transport tests do not establish physical-device
+  qualification, sensing accuracy, or sustained capture performance.
+- [Measured ESP32-C6 collector-path verification](docs/verification/esp32-c6-2026-10-12.md)
+  covers real binary UDP through a collector into JSON UDP/file capture and the
+  downstream pipeline. Direct JSON serial and other boards remain unqualified.
+
 ## [0.3.1] — 2026-05-12
 
 ### Fixed
